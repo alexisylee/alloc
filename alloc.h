@@ -29,10 +29,16 @@ struct packed s_header {
 };
 typedef struct packed s_header header;
 
+struct packed f_header {
+    word w: 30;
+    bool alloced: 1;
+    bool unused reserved: 1;
+};
+typedef struct packed f_header header;
+
 #define reterr(x) errno = (x); return (void *) 0
 
 void show(header*);
-void *mkalloc(word, header *);
 void *alloc(int32);
 void free(void *);
 int main(int, char**);

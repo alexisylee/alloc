@@ -67,8 +67,25 @@ void *alloc(int32 bytes) {
         // while haven't found unitialized space
         while (hdr->w != 0) {
             if (hdr->w >= words && !hdr->alloced) {
-                // TODO consider splitting the block
-                return mkalloc(words, hdr);
+                // split
+                if (hdr->w >= words + 2) {
+                    word oldSize = hdr->w;
+
+                    hdr->w = words;
+                    hdr->alloced = true;
+                    void *ret = (void *)((char *)hdr + 4);
+                
+                    // create new header for remaining space
+                    header *newHdr = (header *)((char *)hdr + 4 + (words * 4));
+                    newHdr->w = oldSize - words - 1;  // subtract allocated + header
+                    newHdr->alloced = false;
+                    newHdr->reserved = 0;
+                    
+                    return ret;
+                } else {
+                    hdr->alloced = true;
+                    return (void *)((char *)hdr + 4);
+                }
             }
             char *p = (char *)hdr + 4 + (hdr->w * 4);
             hdr = (header *)p;
@@ -84,6 +101,16 @@ void *alloc(int32 bytes) {
 void free(void *ptr) {
     header *hdr = (header *) ((char *)ptr - 4);
     hdr->alloced = false;
+
+    // coalesce
+    header *next = (header *)((char *)hdr + 4 + (hdr->w * 4));
+    
+    printf("Hdr address: 0x%d\n", hdr);
+    while (next->w != 0 && !next->alloced) {
+        printf("Next address: 0x%d\n", next);
+        hdr->w += next->w + 1;
+        next = (header *)((char *)next + 4 + (next->w * 4));
+    }
 }
 
 void show(header *hdr) {
@@ -99,23 +126,20 @@ int main(int argc, char *argv[]) {
     (void) argc;
     (void) argv;
     
-    int8 *p;
-    int8 *p2; 
-    int8 *p3;
-
-    printf("Memspace = 0x%x\n", (int8 *)memspace);
-    p = alloc(7);
-    // printf("Alloc1 = 0x%x\n", (int8 *)p);
-
-    p2 = alloc(2000);
-    // printf("Alloc2 = 0x%x\n", (int8 *)p2);
-
-    p3 = alloc(1);
+    int8 *p1 = alloc(40);   // 10 words
+    int8 *p2 = alloc(80);   // 20 words
+    int8 *p3 = alloc(120);  // 30 words
+    int8 *p4 = alloc(160);  // 40 words
     
-    // printf("Alloc3 = 0x%x\n", (int8 *)p3);
-    show(memspace);
+    printf("=== Initial ===\n");
+    show((header *)memspace);
+    
+    printf("\n=== Free p1, p2, p3 (should coalesce) ===\n");
+    free(p1);
+    free(p2);
     free(p3);
-    show(memspace);
+    
+    show((header *)memspace);
 
     
     return 0;
