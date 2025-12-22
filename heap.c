@@ -1,0 +1,1 @@
+char memspace[1024ULL * 1024 * 1024];
