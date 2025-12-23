@@ -1,5 +1,66 @@
 #include "alloc.h"
 
+static inline word ptr_to_offset(header *ptr) {
+    if (ptr == NULL) return 0;
+    return (word)((char *)ptr - (char *)memspace);
+}
+
+static inline header *offset_to_ptr(word offset) {
+    if (offset == 0) return NULL;
+    return (header *)((char *)memspace + offset);
+}
+
+// get size class for a given word count
+int get_size_class(word words) {
+    for (int i = 0; i < NUM_SIZE_CLASSES; i++) {
+        if (words <= SIZE_CLASS_LIMITS[i]) {
+            return i;
+        }
+    }
+    return NUM_SIZE_CLASSES - 1;
+}
+
+// add block to appropriate free list
+void add_to_free_list(header *hdr) {
+    int class = get_size_class(hdr->w);
+    
+    // insert at head of list
+    hdr->next_offset = ptr_to_offset(free_lists[class]);
+    free_lists[class] = hdr;
+}
+
+// remove block from free list
+void remove_from_free_list(header *hdr) {
+    int class = get_size_class(hdr->w);
+    
+    if (free_lists[class] == hdr) {
+        free_lists[class] = offset_to_ptr(hdr->next_offset);
+    } else {
+        header *curr = free_lists[class];
+        while (curr && offset_to_ptr(curr->next_offset) != hdr) {
+            curr = offset_to_ptr(curr->next_offset);
+        }
+        if (curr) {
+            curr->next_offset = hdr->next_offset;
+        }
+    }
+    
+    hdr->next_offset = 0;
+}
+
+// find free block in size class (first-fit within class)
+header *find_free_block(word words) {
+    int class = get_size_class(words);
+    
+    for (int i = class; i < NUM_SIZE_CLASSES; i++) {
+        header *curr = free_lists[i];
+        while (curr) {
+            if (curr->w >= words) return curr;
+            curr = offset_to_ptr(curr->next_offset);
+        }
+    }
+    return NULL;
+}
 
 void *mkalloc(word words, header *hdr) {
     // printf("Allocating %d words at address 0x%d\n", words, hdr);
@@ -20,7 +81,7 @@ void *mkalloc(word words, header *hdr) {
     hdr->alloced = true;
     
     // return pointer to right after header
-    ret = (void *)((char *)hdr + 4);
+    ret = (void *)((char *)hdr + 8);
 
     footer *ftr = GET_FOOTER(hdr);
     ftr->w = words;
@@ -45,20 +106,21 @@ void *split_block(header *hdr, word requested_words) {
     
     // set up allocated block
     set_block(hdr, requested_words, true);
-    void *ret = (void *)((char *)hdr + 4);
+    void *ret = (void *)((char *)hdr + 8);
     
     // create remainder block
     footer *ftr = GET_FOOTER(hdr);
     header *new_hdr = (header *)((char *)ftr + 4);
     new_hdr->reserved = 0;
     set_block(new_hdr, old_size - requested_words - 2, false);
+
+    add_to_free_list(new_hdr);
     
     return ret;
 }
 // allocates memory of bytes bytes, returns pointer to it
 void *alloc(int32 bytes) {
     word words;
-    header *hdr;
     void *mem; 
 
     if (bytes % 4) {
@@ -67,33 +129,40 @@ void *alloc(int32 bytes) {
         words = (bytes / 4);
     }
 
-    mem = (void *)memspace;
-    hdr = (header *)mem;
+    header *hdr = find_free_block(words);
     
-    // search for free block
-    while (hdr->w != 0) {
-        if (!hdr->alloced && hdr->w >= words) {
-            // found free block big enough
-            if (hdr->w >= words + 2) {
-                return split_block(hdr, words);
-            } else {
-                set_block(hdr, hdr->w, true);
-                return (void *)((char *)hdr + 4);
-            }
+    if (hdr) {
+        // found a free block
+        remove_from_free_list(hdr);
+        
+        if (hdr->w >= words + 2) {
+            return split_block(hdr, words);
+        } else {
+            set_block(hdr, hdr->w, true);
+            return (void *)((char *)hdr + 8);
         }
-        // increment
+    }
+    
+    // no free block - allocate at end of heap
+    hdr = (header *)memspace;
+    
+    // find first uninitialized space
+    while (hdr->w != 0) {
         footer *ftr = GET_FOOTER(hdr);
         hdr = GET_NEXT_HEADER(ftr);
     }
     
-    // hit uninitialized space
+    if (words > MAXWORDS) {
+        reterr(ErrNoMem);
+    }
+    
     return mkalloc(words, hdr);
 }
 
 void free(void *ptr) {
     if (ptr == NULL) return;
 
-    header *hdr = (header *) ((char *)ptr - 4);
+    header *hdr = (header *) ((char *)ptr - 8);
     footer *ftr = GET_FOOTER(hdr);
     hdr->alloced = false;
     ftr->alloced = false;
@@ -102,7 +171,9 @@ void free(void *ptr) {
     header *next = (header *)((char *)ftr + 4);
     
     if (next->w != 0 && !next->alloced) {
-        hdr->w += next->w + 2;
+        remove_from_free_list(next);
+
+        hdr->w += next->w + 3;
         ftr = GET_FOOTER(hdr);
         ftr->w = hdr->w;
         ftr->alloced = false;
@@ -114,24 +185,37 @@ void free(void *ptr) {
     
         if (prev_ftr->w != 0 && !prev_ftr->alloced) {
             header *prev_hdr = GET_HEADER_FROM_FOOTER(prev_ftr);
-            prev_hdr->w += hdr->w + 2;
+            prev_hdr->w += hdr->w + 3;
+
+            remove_from_free_list(prev_hdr);
 
             ftr = GET_FOOTER(prev_hdr);
             ftr->w = prev_hdr->w;
             ftr->alloced = false;
+
+            hdr = prev_hdr;
         }
     }
+    add_to_free_list(hdr);
 }
 
 void show(header *hdr) {
     if (hdr == NULL) return;
 
-    header *p;
-    void *mem;
-    int32 n;
-    for (n = 1, p = hdr; p->w; mem = (char *)p + ((p->w + 2) * 4), p = mem, n++) {
-        printf("Alloc %d = %u %s words at %d\n", n, p->w, (p->alloced) ? "alloced" : "freed", p);
-        printf("Next block is 0x%d\n\n", (char *)p + ((p->w + 2) * 4));
+    header *p = hdr;
+    int32 n = 1;
+    
+    while (p->w != 0) {
+        printf("Alloc %d = %u %s words at %p\n", 
+               n, p->w, 
+               (p->alloced) ? "alloced" : "freed", 
+               (void *)p);
+        
+        footer *ftr = GET_FOOTER(p);
+        p = GET_NEXT_HEADER(ftr);
+        
+        printf("Next block is %p\n\n", (void *)p);
+        n++;
     }
 }
 

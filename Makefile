@@ -3,8 +3,8 @@ CFLAGS = -Wall -Wextra -g -std=c11
 LDFLAGS =
 
 # Main program
-TARGET = alloc
-SRCS = alloc.c heap.c
+TARGET = main
+SRCS = main.c alloc.c heap.c
 OBJS = $(SRCS:.c=.o)
 
 TEST_TARGET = test_alloc

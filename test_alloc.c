@@ -5,7 +5,7 @@
 
 // helper to get header from pointer
 header *get_header(void *ptr) {
-    return (header *)((char *)ptr - 4);
+    return (header *)((char *)ptr - 8);
 }
 
 
@@ -19,7 +19,7 @@ void test_multiple_allocations() {
     assert(p2 > p1 && p3 > p2);
     
     ptrdiff_t diff = (char *)p2 - (char *)p1;
-    assert(diff == 48);
+    assert(diff == 52);
 }
 
 void test_free_and_reuse() {
@@ -48,7 +48,8 @@ void test_forward_coalesce() {
     free(p3);
     
     header *h2 = get_header(p2);
-    assert(h2->w == 52);
+    // printf("h2->w is %d\n", h2->w);
+    assert(h2->w == 53);
     assert(h2->alloced == false);
 }
 
@@ -62,7 +63,9 @@ void test_backward_coalesce() {
     free(p1);
     
     header *h1 = get_header(p1);
-    assert(h1->w == 32);
+    // printf("h1->w is %d\n", h1->w);
+
+    assert(h1->w == 33);
     assert(h1->alloced == false);
 }
 
@@ -81,8 +84,8 @@ void test_full_coalesce() {
     // show((header *)memspace);
     
     header *h1 = get_header(p1);
-    printf("%d\n", h1->w);
-    assert(h1->w == 64);
+    // printf("%d\n", h1->w);
+    assert(h1->w == 66);
     assert(h1->alloced == false);
 }
 
@@ -96,6 +99,7 @@ void test_write_read() {
 
 void test_splitting() {
     memset(memspace, 0, 1024 * 1024 * 1024);
+
     int8 *p1 = alloc(400);  
     free(p1);
     // show(memspace);
