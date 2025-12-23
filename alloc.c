@@ -1,14 +1,16 @@
 #include "alloc.h"
 
-extern char memspace[];
 
 void *mkalloc(word words, header *hdr) {
+    // printf("Allocating %d words at address 0x%d\n", words, hdr);
+    if (hdr == NULL) return NULL;
+
     void *ret;
     ptrdiff_t bytesIn;
     word wordsIn;
 
     bytesIn = (char *)hdr - (char *)memspace;
-    wordsIn = (bytesIn / 4) + 1;
+    wordsIn = (bytesIn / 4);
 
     if (words > (MAXWORDS - wordsIn)) {
         reterr(ErrNoMem);
@@ -16,24 +18,43 @@ void *mkalloc(word words, header *hdr) {
 
     hdr->w = words;
     hdr->alloced = true;
-    ret = (void *) hdr + 4;
+    
+    // return pointer to right after header
+    ret = (void *)((char *)hdr + 4);
+
+    footer *ftr = GET_FOOTER(hdr);
+    ftr->w = words;
+    ftr->alloced = true;
     
     return ret;
 }
 
-// what is n?
-// header *findblock(header *hdr, word n) {
-//     if (n > MAXWORDS) {
-//         reterr(ErrNoMem);
-//     }
+void set_block(header *hdr, word size, bool is_alloced) {
+    hdr->w = size;
+    hdr->alloced = is_alloced;
+    
+    footer *ftr = GET_FOOTER(hdr);
+    ftr->w = size;
+    ftr->alloced = is_alloced;
+    ftr->reserved = 0;
+}
 
-//     if (!(hdr->w)) {
-
-//     } else {
-
-//     }
-// }
-
+// split block: returns pointer to data of first block
+void *split_block(header *hdr, word requested_words) {
+    word old_size = hdr->w;
+    
+    // set up allocated block
+    set_block(hdr, requested_words, true);
+    void *ret = (void *)((char *)hdr + 4);
+    
+    // create remainder block
+    footer *ftr = GET_FOOTER(hdr);
+    header *new_hdr = (header *)((char *)ftr + 4);
+    new_hdr->reserved = 0;
+    set_block(new_hdr, old_size - requested_words - 2, false);
+    
+    return ret;
+}
 // allocates memory of bytes bytes, returns pointer to it
 void *alloc(int32 bytes) {
     word words;
@@ -46,101 +67,71 @@ void *alloc(int32 bytes) {
         words = (bytes / 4);
     }
 
-    mem = (void *) memspace;
-    hdr = (header *) mem;
-
-    // hdr->w = 2;
-
-    // first time allocated
-    if (!(hdr->w)) {
-        if (words > MAXWORDS) {
-            reterr(ErrNoMem);
-        } 
-        
-        mem = mkalloc(words, hdr);
-        if (!mem) {
-            return (void *)(intptr_t) errno;
-        }
-
-        return mem;
-    } else {
-        // while haven't found unitialized space
-        while (hdr->w != 0) {
-            if (hdr->w >= words && !hdr->alloced) {
-                // split
-                if (hdr->w >= words + 2) {
-                    word oldSize = hdr->w;
-
-                    hdr->w = words;
-                    hdr->alloced = true;
-                    void *ret = (void *)((char *)hdr + 4);
-                
-                    // create new header for remaining space
-                    header *newHdr = (header *)((char *)hdr + 4 + (words * 4));
-                    newHdr->w = oldSize - words - 1;  // subtract allocated + header
-                    newHdr->alloced = false;
-                    newHdr->reserved = 0;
-                    
-                    return ret;
-                } else {
-                    hdr->alloced = true;
-                    return (void *)((char *)hdr + 4);
-                }
-            }
-            char *p = (char *)hdr + 4 + (hdr->w * 4);
-            hdr = (header *)p;
-        }
-        // hit uninitialized space
-        return mkalloc(words, hdr);
-    }
-
-    return NULL;
+    mem = (void *)memspace;
+    hdr = (header *)mem;
     
+    // search for free block
+    while (hdr->w != 0) {
+        if (!hdr->alloced && hdr->w >= words) {
+            // found free block big enough
+            if (hdr->w >= words + 2) {
+                return split_block(hdr, words);
+            } else {
+                set_block(hdr, hdr->w, true);
+                return (void *)((char *)hdr + 4);
+            }
+        }
+        // increment
+        footer *ftr = GET_FOOTER(hdr);
+        hdr = GET_NEXT_HEADER(ftr);
+    }
+    
+    // hit uninitialized space
+    return mkalloc(words, hdr);
 }
 
 void free(void *ptr) {
-    header *hdr = (header *) ((char *)ptr - 4);
-    hdr->alloced = false;
+    if (ptr == NULL) return;
 
-    // coalesce
-    header *next = (header *)((char *)hdr + 4 + (hdr->w * 4));
+    header *hdr = (header *) ((char *)ptr - 4);
+    footer *ftr = GET_FOOTER(hdr);
+    hdr->alloced = false;
+    ftr->alloced = false;
+
+    // forward coalesce
+    header *next = (header *)((char *)ftr + 4);
     
-    printf("Hdr address: 0x%d\n", hdr);
-    while (next->w != 0 && !next->alloced) {
-        printf("Next address: 0x%d\n", next);
-        hdr->w += next->w + 1;
-        next = (header *)((char *)next + 4 + (next->w * 4));
+    if (next->w != 0 && !next->alloced) {
+        hdr->w += next->w + 2;
+        ftr = GET_FOOTER(hdr);
+        ftr->w = hdr->w;
+        ftr->alloced = false;
+    }
+
+    // backward coalesce
+    if ((char *)hdr > (char *)memspace) {
+        footer *prev_ftr = GET_PREV_FOOTER(hdr);
+    
+        if (prev_ftr->w != 0 && !prev_ftr->alloced) {
+            header *prev_hdr = GET_HEADER_FROM_FOOTER(prev_ftr);
+            prev_hdr->w += hdr->w + 2;
+
+            ftr = GET_FOOTER(prev_hdr);
+            ftr->w = prev_hdr->w;
+            ftr->alloced = false;
+        }
     }
 }
 
 void show(header *hdr) {
+    if (hdr == NULL) return;
+
     header *p;
     void *mem;
     int32 n;
-    for (n = 1, p = hdr; p->w; mem = (void *)p + ((p->w + 1) * 4), p = mem, n++) {
-        printf("Alloc %d = %u %s words\n", n, p->w, (p->alloced) ? "alloced" : "freed");
+    for (n = 1, p = hdr; p->w; mem = (char *)p + ((p->w + 2) * 4), p = mem, n++) {
+        printf("Alloc %d = %u %s words at %d\n", n, p->w, (p->alloced) ? "alloced" : "freed", p);
+        printf("Next block is 0x%d\n\n", (char *)p + ((p->w + 2) * 4));
     }
 }
 
-int main(int argc, char *argv[]) {
-    (void) argc;
-    (void) argv;
-    
-    int8 *p1 = alloc(40);   // 10 words
-    int8 *p2 = alloc(80);   // 20 words
-    int8 *p3 = alloc(120);  // 30 words
-    int8 *p4 = alloc(160);  // 40 words
-    
-    printf("=== Initial ===\n");
-    show((header *)memspace);
-    
-    printf("\n=== Free p1, p2, p3 (should coalesce) ===\n");
-    free(p1);
-    free(p2);
-    free(p3);
-    
-    show((header *)memspace);
-
-    
-    return 0;
-}
