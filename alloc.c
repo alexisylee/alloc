@@ -1,5 +1,7 @@
 #include "alloc.h"
 
+pthread_mutex_t alloc_mutex = PTHREAD_MUTEX_INITIALIZER;
+
 static inline word ptr_to_offset(header *ptr) {
     if (ptr == NULL) return 0;
     return (word)((char *)ptr - (char *)memspace);
@@ -112,7 +114,7 @@ void *split_block(header *hdr, word requested_words) {
     footer *ftr = GET_FOOTER(hdr);
     header *new_hdr = (header *)((char *)ftr + 4);
     new_hdr->reserved = 0;
-    set_block(new_hdr, old_size - requested_words - 2, false);
+    set_block(new_hdr, old_size - requested_words - 3, false);
 
     add_to_free_list(new_hdr);
     
@@ -120,6 +122,7 @@ void *split_block(header *hdr, word requested_words) {
 }
 // allocates memory of bytes bytes, returns pointer to it
 void *alloc(int32 bytes) {
+    pthread_mutex_lock(&alloc_mutex);
     word words;
     void *mem; 
 
@@ -132,14 +135,21 @@ void *alloc(int32 bytes) {
     header *hdr = find_free_block(words);
     
     if (hdr) {
+        printf("[ALLOC] Found free block at %p, size %u\n", (void *)hdr, hdr->w);
         // found a free block
         remove_from_free_list(hdr);
         
-        if (hdr->w >= words + 2) {
-            return split_block(hdr, words);
+        if (hdr->w >= words + 4) {
+            mem = split_block(hdr, words);
+            printf("[ALLOC] Split block, returning %p\n", mem);
+            pthread_mutex_unlock(&alloc_mutex);
+            return mem;
         } else {
             set_block(hdr, hdr->w, true);
-            return (void *)((char *)hdr + 8);
+            mem = (void *)((char *)hdr + 8);
+            printf("[ALLOC] Using whole block, returning %p\n", mem);
+            pthread_mutex_unlock(&alloc_mutex);
+            return mem;
         }
     }
     
@@ -156,17 +166,24 @@ void *alloc(int32 bytes) {
         reterr(ErrNoMem);
     }
     
-    return mkalloc(words, hdr);
+    void *m = mkalloc(words, hdr);
+    pthread_mutex_unlock(&alloc_mutex);
+    return m;
 }
 
 void free(void *ptr) {
-    if (ptr == NULL) return;
+    pthread_mutex_lock(&alloc_mutex);
+
+    if (ptr == NULL) {
+        pthread_mutex_unlock(&alloc_mutex);
+        return;
+    }
 
     header *hdr = (header *) ((char *)ptr - 8);
     footer *ftr = GET_FOOTER(hdr);
     hdr->alloced = false;
     ftr->alloced = false;
-
+    printf("[FREE] Freeing %p (header at %p, size %u)\n", ptr, (void *)hdr, hdr->w);
     // forward coalesce
     header *next = (header *)((char *)ftr + 4);
     
@@ -185,10 +202,9 @@ void free(void *ptr) {
     
         if (prev_ftr->w != 0 && !prev_ftr->alloced) {
             header *prev_hdr = GET_HEADER_FROM_FOOTER(prev_ftr);
-            prev_hdr->w += hdr->w + 3;
-
             remove_from_free_list(prev_hdr);
 
+            prev_hdr->w += hdr->w + 3;
             ftr = GET_FOOTER(prev_hdr);
             ftr->w = prev_hdr->w;
             ftr->alloced = false;
@@ -196,7 +212,9 @@ void free(void *ptr) {
             hdr = prev_hdr;
         }
     }
+    printf("[FREE] Adding %p to free list (size %u)\n", (void *)hdr, hdr->w);
     add_to_free_list(hdr);
+    pthread_mutex_unlock(&alloc_mutex);
 }
 
 void show(header *hdr) {

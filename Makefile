@@ -1,6 +1,6 @@
 CC = gcc
-CFLAGS = -Wall -Wextra -g -std=c11
-LDFLAGS =
+CFLAGS = -fsanitize=thread -pthread -Wall -Wextra -g -std=c11
+LDFLAGS = -fsanitize=thread -pthread
 
 # Main program
 TARGET = main

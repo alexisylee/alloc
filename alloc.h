@@ -7,6 +7,7 @@
 #include <assert.h>
 #include <errno.h>
 #include <stddef.h>
+#include <pthread.h>
 
 #define packed __attribute__((__packed__))
 #define unused __attribute__((__unused__))
@@ -71,7 +72,9 @@ static const word SIZE_CLASS_LIMITS[NUM_SIZE_CLASSES] = {
 static header *free_lists[NUM_SIZE_CLASSES] = {NULL};
 
 extern char memspace[];
+// extern pthread_mutex_t alloc_mutex;
 
 void show(header*);
 void *alloc(int32);
 void free(void *);
+

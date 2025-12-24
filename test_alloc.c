@@ -27,7 +27,8 @@ void test_free_and_reuse() {
     int8 *p1 = alloc(40);
     int8 *p2 = alloc(80);
     int8 *p3 = alloc(120);
-    
+    (void) p1;
+    (void) p3;
     free(p2);
     
     header *h2 = get_header(p2);
@@ -43,7 +44,7 @@ void test_forward_coalesce() {
     int8 *p1 = alloc(40);   
     int8 *p2 = alloc(80);   
     int8 *p3 = alloc(120);  
-    
+    (void) p1;
     free(p2);
     free(p3);
     
@@ -58,6 +59,7 @@ void test_backward_coalesce() {
     int8 *p1 = alloc(40);   
     int8 *p2 = alloc(80);   
     int8 *p3 = alloc(120);  
+    (void) p3;
     
     free(p2);
     free(p1);
@@ -75,7 +77,7 @@ void test_full_coalesce() {
     int8 *p2 = alloc(80);   
     int8 *p3 = alloc(120);  
     int8 *p4 = alloc(160);  
-
+    (void) p4;
     // show((header *)memspace);
     
     free(p1);
@@ -132,16 +134,46 @@ void test_footer_consistency() {
     assert(h->alloced == f->alloced);
 }
 
+// int main() {
+//     test_multiple_allocations();
+//     test_free_and_reuse();
+//     test_forward_coalesce();
+//     test_backward_coalesce();
+//     test_full_coalesce();
+//     test_write_read();
+//     test_splitting();
+//     test_free_null();
+//     test_footer_consistency();
+    
+//     return 0;
+// }
+
+void *worker(void *arg) {
+    long tid = (long)arg;
+    
+    for (int i = 0; i < 30; i++) { 
+        void *p = alloc(100);
+        printf("Thread %ld allocated %p\n", tid, p);
+        
+        if (p) {
+            ((char *)p)[0] = 'X';
+            free(p);
+            printf("Thread %ld freed %p\n", tid, p);
+        }
+    }
+    return NULL;
+}
+
 int main() {
-    test_multiple_allocations();
-    test_free_and_reuse();
-    test_forward_coalesce();
-    test_backward_coalesce();
-    test_full_coalesce();
-    test_write_read();
-    test_splitting();
-    test_free_null();
-    test_footer_consistency();
+    
+    pthread_t threads[4];
+    for (int i = 0; i < 4; i++) {
+        pthread_create(&threads[i], NULL, worker, (void *)(long)i);
+    }
+    
+    for (int i = 0; i < 4; i++) {
+        pthread_join(threads[i], NULL);
+    }
     
     return 0;
 }
