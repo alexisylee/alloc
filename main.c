@@ -2,7 +2,7 @@
 #include <stdio.h>
 
 int main() {
-    
+    init_allocator();
     int8 *p1 = alloc(40);   // 10 words
     int8 *p2 = alloc(80);   // 20 words
     int8 *p3 = alloc(120);  // 30 words

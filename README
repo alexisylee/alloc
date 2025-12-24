@@ -1,0 +1,5 @@
+## Concurrent Memory Allocator
+  A thread-safe memory allocator featuring segregated free lists with 8 size classes,
+  bidirectional coalescing for fragmentation reduction, and fine-grained per-size-class
+  locking for high concurrency. Implements first-fit allocation with block splitting
+  and achieves data-race-free operation verified by ThreadSanitizer.

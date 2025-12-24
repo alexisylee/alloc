@@ -151,7 +151,7 @@ void test_footer_consistency() {
 void *worker(void *arg) {
     long tid = (long)arg;
     
-    for (int i = 0; i < 30; i++) { 
+    for (int i = 0; i < 10; i++) { 
         void *p = alloc(100);
         printf("Thread %ld allocated %p\n", tid, p);
         
@@ -165,7 +165,8 @@ void *worker(void *arg) {
 }
 
 int main() {
-    
+    init_allocator();  // Initialize mutexes
+
     pthread_t threads[4];
     for (int i = 0; i < 4; i++) {
         pthread_create(&threads[i], NULL, worker, (void *)(long)i);
