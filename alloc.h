@@ -14,9 +14,10 @@
 
 #define MAXWORDS ((1024 * 1024 * 1024 / 4) - 2)
 #define NUM_SIZE_CLASSES 8
+#define THREAD_CACHE_SIZE 64  // blocks per size class per thread
 
-#define HEADER_SIZE 8
-#define FOOTER_SIZE 4
+#define HEADER_SIZE sizeof(header)
+#define FOOTER_SIZE sizeof(footer)
 #define OVERHEAD (HEADER_SIZE + FOOTER_SIZE)
 
 #define err_no_mem 1
@@ -25,23 +26,20 @@
 typedef unsigned int int32;
 typedef int32 word;
 
-// block header (8 bytes) - stores block metadata
-struct packed s_header {
-    word w: 30;              // size in words (data region only, excludes header/footer)
-    bool alloced: 1;         // true if allocated, false if free
-    bool unused reserved: 1; // reserved for future use
-    word next_offset;        // offset to next block in free list (0 if not in list)
+// block header - stores block metadata
+struct s_header {
+    word w;              // size in words (data region only, excludes header/footer)
+    bool alloced;        // true if allocated, false if free
+    word next_offset;    // offset to next block in free list (0 if not in list)
 };
-typedef struct packed s_header header;
+typedef struct s_header header;
 
-// block footer (4 bytes) 
-struct packed s_footer {
-    word w: 30;              // size in words (must match header)
-    bool alloced: 1;         // allocation status (must match header)
-    bool unused reserved: 1; // reserved for future use
+// block footer
+struct s_footer {
+    word w;              // size in words (must match header)
+    bool alloced;        // allocation status (must match header)
 };
-typedef struct packed s_footer footer;
-
+typedef struct s_footer footer;
 
 #define GET_FOOTER(hdr) \
     ((footer *)((char *)(hdr) + HEADER_SIZE + ((hdr)->w * sizeof(word))))
@@ -63,11 +61,7 @@ extern header *free_lists[NUM_SIZE_CLASSES];
 extern char memspace[];
 
 // public api
-// initialize allocator mutexes and state (call once before any alloc/free)
 void init_allocator(void);
-// allocate memory of specified size in bytes
 void *alloc(int32 bytes);
-// free previously allocated memory
-void free(void *ptr);
-// debug utility: display all blocks in memory
+void dealloc(void *ptr);
 void show(header *hdr);

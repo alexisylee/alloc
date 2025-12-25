@@ -1,5 +1,36 @@
-## Concurrent Memory Allocator
-  A thread-safe memory allocator featuring segregated free lists with 8 size classes,
-  bidirectional coalescing for fragmentation reduction, and fine-grained per-size-class
-  locking for high concurrency. Implements first-fit allocation with block splitting
-  and achieves data-race-free operation verified by ThreadSanitizer.
+# Thread-Safe Memory Allocator
+
+A high-performance memory allocator implemented in C with segregated free lists, fine-grained locking, and per-thread caches for efficient concurrent allocation.
+
+## Performance
+
+Benchmarked on x86_64h:
+
+| Configuration | Throughput | vs glibc malloc | Speedup vs Single-Threaded |
+|---------------|-----------|-----------------|---------------------------|
+| Single-threaded | 87M ops/sec | 0.52x | 1.0x |
+| 2 threads | 86M ops/sec | 0.52x | 0.99x |
+| 4 threads | 115M ops/sec | 0.70x | 1.32x |
+| 8 threads | 144M ops/sec | 0.87x | 1.66x |
+
+
+
+## Architecture
+
+Each block contains:
+- Header: Size (4B), allocation status (1B), free list pointer (4B)
+- Footer: Size (4B), allocation status (1B) for backward coalescing
+
+Size Class Distributions:
+- Class 0: 1-8 words     (4-32 bytes)
+- Class 1: 9-16 words    (36-64 bytes)
+- Class 2: 17-32 words   (68-128 bytes)
+- Class 3: 33-64 words   (132-256 bytes)
+- Class 4: 65-128 words  (260-512 bytes)
+- Class 5: 129-256 words (516-1024 bytes)
+- Class 6: 257-512 words (1028-2048 bytes)
+- Class 7: 513+ words    (2052+ bytes)
+
+
+Thread-Local Caching: each thread maintains private caches (64 blocks per size class)
+
